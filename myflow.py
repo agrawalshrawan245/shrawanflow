@@ -9,12 +9,15 @@ class Operation():
         for node in input_nodes:
             node.output_nodes.append(self)
 
+        _default_graph.operations.append(self)
+
 class Variable():
 
     def __init__(self, initial_value):
         self.output = initial_value
         self.output_nodes = []
         self.delta_val = 0
+        _default_graph.variables.append(self)
 
     def predict(self, feed_dict):
         pass
@@ -30,6 +33,7 @@ class Placeholder():
 
     def __init__(self):
         self.output_nodes = []
+        _default_graph.placeholders.append(self)
 
     def predict(self, feed_dict):
         self.output = feed_dict[self]
@@ -96,23 +100,33 @@ class reduced_mean(Operation):
 
 class Session():
 
-    def __init__(self, variable_lis = []):
-        self.iterator = 0
-        self.variable_lis = variable_lis
-
     def predict(self, node, feed_dict = {}):
         return node.predict(feed_dict)
 
     def fit(self, node, l_rate, epochs = 1, feed_dict = {}):
-        self.iterator = 1 + self.iterator
+        _default_graph.iterator = 1 + _default_graph.iterator
         node.predict(feed_dict)
         node.fit(l_rate)
-        if self.iterator == epochs:
-            self.iterator = 0
-            for variable in self.variable_lis:
+        if _default_graph.iterator == epochs:
+            _default_graph.iterator = 0
+            for variable in _default_graph.variables:
                 variable.deltazero(epochs)
 
+class Graph():
 
+    def __init__(self):
+        self.iterator = 0
+        self.variables = []
+        self.placeholders = []
+        self.operations = []
+
+    def set_as_default(self):
+        global _default_graph
+        _default_graph = self
+
+
+g = Graph()
+g.set_as_default()
 
 a = Variable(np.array([3]))
 b = Variable(np.array([2]))
@@ -121,10 +135,10 @@ y = multiply([a,x])
 z = add([y,b])
 y_true = Placeholder()
 loss = reduced_mean([y_true, z])
-sess = Session([a,b])
 
+sess = Session()
 
-for _ in range(500):
+for _ in range(5000):
     temp = np.random.rand()
     sess.fit(node = loss, l_rate = np.array([0.4]), epochs = 5, feed_dict={x:[temp], y_true:[2 * temp + 8]})
 
