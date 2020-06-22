@@ -1,4 +1,5 @@
 import numpy as np
+import pdb
 
 class Operation():
 
@@ -25,8 +26,8 @@ class Variable():
     def fit(self, delta_val):
         self.delta_val = self.delta_val + delta_val
 
-    def deltazero(self, epochs = 1):
-        self.output = self.output - self.delta_val / epochs
+    def deltazero(self, batch = 1):
+        self.output = self.output - self.delta_val / batch
         self.delta_val = 0
 
 class Placeholder():
@@ -59,6 +60,23 @@ class multiply(Operation):
         for input_node in self.input_nodes:
             input_node.fit(delta_val * self.output / input_node.output)
 
+class matmul(Operation):
+
+    def __init__(self, input_nodes= []):
+        super().__init__(input_nodes = input_nodes)
+  
+    def predict(self, feed_dict):
+        for input_node in self.input_nodes:
+            input_node.predict(feed_dict)
+        inputs = [input_node.output for input_node in self.input_nodes]
+
+        self.output = np.dot(*inputs)
+        return self.output
+
+    def fit(self, delta_val):
+        self.input_nodes[1].fit(np.dot(np.transpose(self.input_nodes[0].output), delta_val))
+        self.input_nodes[0].fit(np.dot(delta_val, np.transpose(self.input_nodes[1].output)))
+
 class add(Operation):
 
     def __init__(self, input_nodes= []):
@@ -76,10 +94,9 @@ class add(Operation):
         for input_node in self.input_nodes:
             input_node.fit(delta_val)
 
+class subtract(Operation):
 
-class reduced_mean(Operation):
-
-    def __init__(self, input_nodes = []):
+    def __init__(self, input_nodes= []):
         super().__init__(input_nodes = input_nodes)
 
     def predict(self, feed_dict):
@@ -87,30 +104,43 @@ class reduced_mean(Operation):
             input_node.predict(feed_dict)
         inputs = [input_node.output for input_node in self.input_nodes]
 
-        self.output = np.square(inputs[0] - inputs[1])
+        self.output = np.subtract(*inputs)
         return self.output
 
     def fit(self, delta_val):
-        a = self.input_nodes[0]
-        b = self.input_nodes[1]
-        delta = 2 * (a.output - b.output)
-        a.fit(delta_val * delta)
-        b.fit(-delta_val * delta)
+        self.input_nodes[0].fit(delta_val)
+        self.input_nodes[1].fit(-delta_val)
 
+class square_error(Operation):
+
+    def __init__(self, input_nodes = []):
+        super().__init__(input_nodes = input_nodes)
+        
+    def predict(self, feed_dict):
+        for input_node in self.input_nodes:
+            input_node.predict(feed_dict)
+        inputs = [input_node.output for input_node in self.input_nodes]
+
+        self.output = np.square(*inputs).sum()
+        return self.output
+
+    def fit(self, delta_val):
+        for input_node in self.input_nodes:
+            input_node.fit(2*delta_val*input_node.output)
 
 class Session():
 
     def predict(self, node, feed_dict = {}):
         return node.predict(feed_dict)
 
-    def fit(self, node, l_rate, epochs = 1, feed_dict = {}):
+    def fit(self, node, l_rate, batch = 1, feed_dict = {}):
         _default_graph.iterator = 1 + _default_graph.iterator
         node.predict(feed_dict)
         node.fit(l_rate)
-        if _default_graph.iterator == epochs:
+        if _default_graph.iterator == batch:
             _default_graph.iterator = 0
             for variable in _default_graph.variables:
-                variable.deltazero(epochs)
+                variable.deltazero(batch)
 
 class Graph():
 
@@ -128,23 +158,35 @@ class Graph():
 g = Graph()
 g.set_as_default()
 
-a = Variable(np.array([3]))
-b = Variable(np.array([2]))
+a = Variable(np.array([[2,3],[1,4]]))
+b = Variable(np.array([[1],[6]]))
 x = Placeholder()
-y = multiply([a,x])
+y = matmul([a,x])
 z = add([y,b])
 y_true = Placeholder()
-loss = reduced_mean([y_true, z])
+loss = square_error([subtract([y_true, z])])
 
 sess = Session()
 
-for _ in range(5000):
-    temp = np.random.rand()
-    sess.fit(node = loss, l_rate = np.array([0.4]), epochs = 5, feed_dict={x:[temp], y_true:[2 * temp + 8]})
+A = np.array([[3,5],[6,9]])
+B = np.array([[6],[2]])
+
+print("Earlier:     ")
+print(a.output)
+print(b.output)
+
+for i in range(5000):
+    temp = np.random.rand(2,1)
+    temp_ = np.add(np.dot(A, temp), B)
+    sess.fit(node = loss, l_rate = np.array([0.04]), batch = 1, feed_dict={x:temp, y_true:temp_})
 
 
-print("Earlier: [3.] * " + str(x.output) + " + [2.] = " + str(np.add(np.multiply(3, x.output), 2)))
-print("Now:     " + str(a.output) + " * " + str(x.output) + " + " + str(b.output) + " = " + str(y.output))
+print("Now    :     ")
+print(a.output)
+print(b.output)
 
+
+# Foot notes
+# is it right to do fit(a*b) or it should be fit(dot(a, b))
 
 
