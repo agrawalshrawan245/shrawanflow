@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import pdb
 
 class Operation():
@@ -21,7 +22,7 @@ class Variable():
         _default_graph.variables.append(self)
 
     def predict(self, feed_dict):
-        pass
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
 
     def fit(self, delta_val):
         self.delta_val = self.delta_val + delta_val
@@ -38,6 +39,7 @@ class Placeholder():
 
     def predict(self, feed_dict):
         self.output = feed_dict[self]
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
@@ -54,11 +56,41 @@ class multiply(Operation):
         inputs = [input_node.output for input_node in self.input_nodes]
 
         self.output = np.multiply(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
         for input_node in self.input_nodes:
+            if _default_graph.debug_val != 0: print(self, delta_val * self.output / input_node.output, sep = '\n')
+        for input_node in self.input_nodes:
             input_node.fit(delta_val * self.output / input_node.output)
+
+class sigmoid(Operation):
+
+    def __init__(self, input_nodes= []):
+        super().__init__(input_nodes = input_nodes)
+
+    def sig(self, x):
+        return (1 / (1 + math.exp(-x)))
+
+    def sig_diff(self, x):
+        return self.sig(x) - self.sig(x) * self.sig(x)
+    
+    def predict(self, feed_dict):
+        for input_node in self.input_nodes:
+            input_node.predict(feed_dict)
+        inputs = [input_node.output for input_node in self.input_nodes]
+
+        sig_v = np.vectorize(self.sig)
+        self.output = sig_v(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
+        return self.output
+
+    def fit(self, delta_val):
+        sig_diff_v = np.vectorize(self.sig_diff)
+        temp = np.multiply(sig_diff_v(self.output), delta_val)
+        if _default_graph.debug_val != 0: print(self, temp, sep = '\n')
+        self.input_nodes[0].fit(temp)
 
 class matmul(Operation):
 
@@ -71,9 +103,12 @@ class matmul(Operation):
         inputs = [input_node.output for input_node in self.input_nodes]
 
         self.output = np.dot(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
+        if _default_graph.debug_val != 0: print(self, np.dot(np.transpose(self.input_nodes[0].output), delta_val), sep = '\n')
+        if _default_graph.debug_val != 0: print(self, np.dot(delta_val, np.transpose(self.input_nodes[1].output)), sep = '\n')
         self.input_nodes[1].fit(np.dot(np.transpose(self.input_nodes[0].output), delta_val))
         self.input_nodes[0].fit(np.dot(delta_val, np.transpose(self.input_nodes[1].output)))
 
@@ -88,9 +123,12 @@ class add(Operation):
         inputs = [input_node.output for input_node in self.input_nodes]
 
         self.output = np.add(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
+        for input_node in self.input_nodes:
+            if _default_graph.debug_val != 0: print(self, delta_val, sep = '\n')
         for input_node in self.input_nodes:
             input_node.fit(delta_val)
 
@@ -105,9 +143,12 @@ class subtract(Operation):
         inputs = [input_node.output for input_node in self.input_nodes]
 
         self.output = np.subtract(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
+        if _default_graph.debug_val != 0: print(self, delta_val, sep = '\n')
+        if _default_graph.debug_val != 0: print(self, -delta_val, sep = '\n')
         self.input_nodes[0].fit(delta_val)
         self.input_nodes[1].fit(-delta_val)
 
@@ -122,9 +163,12 @@ class square_error(Operation):
         inputs = [input_node.output for input_node in self.input_nodes]
 
         self.output = np.square(*inputs).sum()
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
         return self.output
 
     def fit(self, delta_val):
+        for input_node in self.input_nodes:
+            if _default_graph.debug_val != 0: print(self, 2*delta_val*input_node.output, sep = '\n')
         for input_node in self.input_nodes:
             input_node.fit(2*delta_val*input_node.output)
 
@@ -135,20 +179,31 @@ class Session():
 
     def fit(self, node, l_rate, batch = 1, feed_dict = {}):
         _default_graph.iterator = 1 + _default_graph.iterator
-        node.predict(feed_dict)
+
+        if _default_graph.debug_val != 0: print("\nForward prop.")
+        loss = node.predict(feed_dict)
+        _default_graph.loss.append(loss)
+
+        if _default_graph.debug_val != 0: print("\nBackward prop.")
         node.fit(l_rate)
         if _default_graph.iterator == batch:
             _default_graph.iterator = 0
             for variable in _default_graph.variables:
                 variable.deltazero(batch)
+        
+        if _default_graph.debug_val != 0: print("--------------------------------------------------")
+        
+        if _default_graph.debug_val != 0: _default_graph.debug_val = _default_graph.debug_val - 1
 
 class Graph():
 
-    def __init__(self):
+    def __init__(self, debug_val = 0):
         self.iterator = 0
         self.variables = []
         self.placeholders = []
         self.operations = []
+        self.loss = []
+        self.debug_val  = debug_val
 
     def set_as_default(self):
         global _default_graph
@@ -158,27 +213,34 @@ class Graph():
 g = Graph()
 g.set_as_default()
 
-a = Variable(np.array([[2,3],[1,4]]))
-b = Variable(np.array([[1],[6]]))
+a = Variable(np.array([[-20,-30],[-10,-40]]))
+b = Variable(np.array([[-10],[-60]]))
 x = Placeholder()
 y = matmul([a,x])
 z = add([y,b])
+z_sig = sigmoid([z])
 y_true = Placeholder()
-loss = square_error([subtract([y_true, z])])
+loss = square_error([subtract([y_true, z_sig])])
 
 sess = Session()
 
-A = np.array([[3,5],[6,9]])
-B = np.array([[6],[2]])
+A = np.array([[3,4],[2,7]])
+B = np.array([[1],[5]])
 
 print("Earlier:     ")
 print(a.output)
 print(b.output)
 
-for i in range(5000):
+def sig(x):
+    return (1 / (1 + math.exp(-x)))
+sig_v = np.vectorize(sig)
+
+
+for i in range(50000):
     temp = np.random.rand(2,1)
-    temp_ = np.add(np.dot(A, temp), B)
-    sess.fit(node = loss, l_rate = np.array([0.04]), batch = 1, feed_dict={x:temp, y_true:temp_})
+    temp_ = sig_v(np.add(np.dot(A, temp), B))
+
+    sess.fit(node = loss, l_rate = np.array([0.7]), batch = 2, feed_dict={x:temp, y_true:temp_})
 
 
 print("Now    :     ")
@@ -188,5 +250,7 @@ print(b.output)
 
 # Foot notes
 # is it right to do fit(a*b) or it should be fit(dot(a, b))
+# global not working for debug_val
+# place names of nodes, also make debugger proper by adding outgoing nodes
 
 
