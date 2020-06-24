@@ -92,6 +92,31 @@ class sigmoid(Operation):
         if _default_graph.debug_val != 0: print(self, temp, sep = '\n')
         self.input_nodes[0].fit(temp)
 
+class inorout(Operation):
+    
+    def __init__(self, input_nodes= []):
+        super().__init__(input_nodes = input_nodes)
+
+    def iomath(self,x):
+        if x < 0: return 0.0
+        else: return 1.0
+        
+    def predict(self, feed_dict):
+        for input_node in self.input_nodes:
+            input_node.predict(feed_dict)
+        inputs = [input_node.output for input_node in self.input_nodes]
+
+        iomath_v = np.vectorize(self.iomath)
+        self.output = iomath_v(*inputs)
+        if _default_graph.debug_val != 0: print(self, self.output, sep = '\n')
+        return self.output
+
+    def fit(self, delta_val):
+        iomath_v = np.vectorize(self.iomath)
+        temp = np.multiply(iomath_v(self.output), delta_val)
+        if _default_graph.debug_val != 0: print(self, temp, sep = '\n')
+        self.input_nodes[0].fit(temp)
+
 class matmul(Operation):
 
     def __init__(self, input_nodes= []):
@@ -182,6 +207,7 @@ class Session():
 
         if _default_graph.debug_val != 0: print("\nForward prop.")
         loss = node.predict(feed_dict)
+        print(loss)
         _default_graph.loss.append(loss)
 
         if _default_graph.debug_val != 0: print("\nBackward prop.")
@@ -194,6 +220,8 @@ class Session():
         if _default_graph.debug_val != 0: print("--------------------------------------------------")
         
         if _default_graph.debug_val != 0: _default_graph.debug_val = _default_graph.debug_val - 1
+
+        return loss
 
 class Graph():
 
@@ -218,7 +246,7 @@ b = Variable(np.array([[-10],[-60]]))
 x = Placeholder()
 y = matmul([a,x])
 z = add([y,b])
-z_sig = sigmoid([z])
+z_sig = inorout([z])
 y_true = Placeholder()
 loss = square_error([subtract([y_true, z_sig])])
 
@@ -231,12 +259,13 @@ print("Earlier:     ")
 print(a.output)
 print(b.output)
 
-def sig(x):
-    return (1 / (1 + math.exp(-x)))
-sig_v = np.vectorize(sig)
+def iomath(x):
+    if x < 0: return 0.0
+    else: return 1.0
+sig_v = np.vectorize(iomath)
 
 
-for i in range(50000):
+for i in range(500):
     temp = np.random.rand(2,1)
     temp_ = sig_v(np.add(np.dot(A, temp), B))
 
